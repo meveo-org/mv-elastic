@@ -13,24 +13,23 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import javax.enterprise.context.RequestScoped;
 
+import com.fasterxml.jackson.databind.ser.std.StdKeySerializers.Default;
+
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
-import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.Requests;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.RestClientBuilder.HttpClientConfigCallback;
 import org.meveo.admin.exception.BusinessException;
 import org.meveo.admin.util.pagination.PaginationConfiguration;
 import org.meveo.api.exception.EntityDoesNotExistsException;
 import org.meveo.model.crm.CustomFieldTemplate;
+import org.meveo.model.crm.custom.CustomFieldTypeEnum;
 import org.meveo.model.customEntities.CustomEntityInstance;
 import org.meveo.model.customEntities.CustomEntityTemplate;
 import org.meveo.model.customEntities.CustomModelObject;
@@ -42,11 +41,22 @@ import org.meveo.persistence.StorageQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.mapping.IntegerNumberProperty;
+import co.elastic.clients.elasticsearch._types.mapping.LongNumberProperty;
+import co.elastic.clients.elasticsearch._types.mapping.Property;
+import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
+import co.elastic.clients.elasticsearch.indices.DeleteIndexRequest;
+import co.elastic.clients.elasticsearch.indices.PutMappingRequest;
+import co.elastic.clients.json.jackson.JacksonJsonpMapper;
+import co.elastic.clients.transport.ElasticsearchTransport;
+import co.elastic.clients.transport.rest_client.RestClientTransport;
+
 @RequestScoped
 public class ElasticStorageImpl implements StorageImpl {
 
-	private Map<String, RestHighLevelClient> clients = new ConcurrentHashMap<String, RestHighLevelClient>();
-	
+	private Map<String, ElasticsearchClient> clients = new ConcurrentHashMap<String, ElasticsearchClient>();
+
 	private static Logger LOG = LoggerFactory.getLogger(ElasticStorageImpl.class);
 
 	@Override
@@ -62,7 +72,8 @@ public class ElasticStorageImpl implements StorageImpl {
 	}
 
 	@Override
-	public Map<String, Object> findById(Repository repository, CustomEntityTemplate cet, String uuid, Map<String, CustomFieldTemplate> cfts, Collection<String> fetchFields, boolean withEntityReferences) {
+	public Map<String, Object> findById(Repository repository, CustomEntityTemplate cet, String uuid,
+			Map<String, CustomFieldTemplate> cfts, Collection<String> fetchFields, boolean withEntityReferences) {
 		// TODO Auto-generated method stub
 		return null;
 	}
@@ -74,13 +85,15 @@ public class ElasticStorageImpl implements StorageImpl {
 	}
 
 	@Override
-	public PersistenceActionResult createOrUpdate(Repository repository, CustomEntityInstance cei, Map<String, CustomFieldTemplate> customFieldTemplates, String foundUuid) throws BusinessException {
+	public PersistenceActionResult createOrUpdate(Repository repository, CustomEntityInstance cei,
+			Map<String, CustomFieldTemplate> customFieldTemplates, String foundUuid) throws BusinessException {
 		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
-	public PersistenceActionResult addCRTByUuids(Repository repository, CustomRelationshipTemplate crt, Map<String, Object> relationValues, String sourceUuid, String targetUuid) throws BusinessException {
+	public PersistenceActionResult addCRTByUuids(Repository repository, CustomRelationshipTemplate crt,
+			Map<String, Object> relationValues, String sourceUuid, String targetUuid) throws BusinessException {
 		// TODO Auto-generated method stub
 		return null;
 	}
@@ -92,7 +105,8 @@ public class ElasticStorageImpl implements StorageImpl {
 	}
 
 	@Override
-	public void setBinaries(Repository repository, CustomEntityTemplate cet, CustomFieldTemplate cft, String uuid, List<File> binaries) throws BusinessException {
+	public void setBinaries(Repository repository, CustomEntityTemplate cet, CustomFieldTemplate cft, String uuid,
+			List<File> binaries) throws BusinessException {
 		// TODO Auto-generated method stub
 
 	}
@@ -104,7 +118,8 @@ public class ElasticStorageImpl implements StorageImpl {
 	}
 
 	@Override
-	public Integer count(Repository repository, CustomEntityTemplate cet, PaginationConfiguration paginationConfiguration) {
+	public Integer count(Repository repository, CustomEntityTemplate cet,
+			PaginationConfiguration paginationConfiguration) {
 		// TODO Auto-generated method stub
 		return null;
 	}
@@ -112,25 +127,29 @@ public class ElasticStorageImpl implements StorageImpl {
 	@Override
 	public void cetCreated(CustomEntityTemplate cet) {
 		for (var repository : cet.getRepositories()) {
-			RestHighLevelClient client = beginTransaction(repository, 0);
-			CreateIndexRequest request = Requests.createIndexRequest(cet.getCode());
-			
+			ElasticsearchClient client = beginTransaction(repository, 0);
+			CreateIndexRequest request = new CreateIndexRequest.Builder()
+				.index(cet.getCode())
+				.build();
+
 			try {
-				client.indices().create(request, RequestOptions.DEFAULT);
+				client.indices().create(request);
 			} catch (IOException e) {
 				LOG.error("Failed to create index for {}", cet.getCode());
 			}
 		}
 	}
-	
+
 	@Override
 	public void removeCet(CustomEntityTemplate cet) {
 		for (var repository : cet.getRepositories()) {
-			RestHighLevelClient client = beginTransaction(repository, 0);
-			DeleteIndexRequest request = Requests.deleteIndexRequest(cet.getCode());
-			
+			ElasticsearchClient client = beginTransaction(repository, 0);
+			DeleteIndexRequest request = new DeleteIndexRequest.Builder()
+				.index(cet.getCode())
+				.build();
+
 			try {
-				client.indices().delete(request, RequestOptions.DEFAULT);
+				client.indices().delete(request);
 			} catch (IOException e) {
 				LOG.error("Failed to delete index for {}", cet.getCode());
 			}
@@ -146,40 +165,37 @@ public class ElasticStorageImpl implements StorageImpl {
 	@Override
 	public void cftCreated(CustomModelObject template, CustomFieldTemplate cft) {
 		for (var repository : template.getRepositories()) {
-			RestHighLevelClient client = beginTransaction(repository, 0);
-			PutMappingRequest request = new PutMappingRequest(template.getCode());
-			
-			Map<String, String> mapping = new HashMap<>();
-			request.source(clients);
+			ElasticsearchClient client = beginTransaction(repository, 0);
 
+			PutMappingRequest request = new PutMappingRequest.Builder()
+				.properties(Map.of(cft.getCode(), getPropertyFromCft(cft)))
+				.type(template.getCode())
+				.build();
 
-				
-			
-//			try {
-//				client.indices().delete(request, RequestOptions.DEFAULT);
-//			} catch (IOException e) {
-//				LOG.error("Failed to delete index for {}", cet.getCode());
-//			}
+			try {
+				client.indices().putMapping(request);
+			} catch (IOException e) {
+				LOG.error("Failed to create mapping for {}", template.getCode());
+			}
 		}
 
 	}
 
 	@Override
 	public void cetUpdated(CustomEntityTemplate oldCet, CustomEntityTemplate cet) {
-		// TODO Auto-generated method stub
+		// TODO 
 
 	}
 
 	@Override
 	public void crtUpdated(CustomRelationshipTemplate cet) throws BusinessException {
-		// TODO Auto-generated method stub
+		// TODO Re-index without field
 
 	}
 
 	@Override
 	public void cftUpdated(CustomModelObject template, CustomFieldTemplate oldCft, CustomFieldTemplate cft) {
-		// TODO Auto-generated method stub
-
+		// TODO Re-index with new field type if it has changed
 	}
 
 	@Override
@@ -202,19 +218,35 @@ public class ElasticStorageImpl implements StorageImpl {
 	@SuppressWarnings("unchecked")
 	@Override
 	public <T> T beginTransaction(Repository repository, int stackedCalls) {
-		return (T) clients.computeIfAbsent(repository.getCode(),code -> {
+		return (T) clients.computeIfAbsent(repository.getCode(), code -> {
 			var cfValues = repository.getCfValues();
-			String elasticUrl = cfValues.getCfValue("elasticUrl").getStringValue();
+			String elasticHost = cfValues.getCfValue("elasticHost").getStringValue();
+			int elasticPort = cfValues.getCfValue("elasticPort").getLongValue().intValue();
 			String elasticUsername = cfValues.getCfValue("elasticUsername").getStringValue();
-			String elasticPassword = cfValues.getCfValue("elasticPassword").getStringValue();
-			
-			//TODO: Decrypt password
-			var httpHost = HttpHost.create(elasticUrl);
-			
-			var clientBuilder = RestClient.builder(httpHost);
-			applyAuthentication(clientBuilder, elasticUsername, elasticPassword);
-			
-			return new RestHighLevelClient(clientBuilder);
+			String elasticPassword = cfValues.getCfValue("elasticPassword").getStringValue(); // TODO: Decrypt password
+
+			final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+
+			credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(elasticUsername, elasticPassword));
+
+			RestClientBuilder builder = RestClient.builder(
+					new HttpHost(elasticHost, elasticPort))
+					.setHttpClientConfigCallback(new HttpClientConfigCallback() {
+						@Override
+						public HttpAsyncClientBuilder customizeHttpClient(
+								HttpAsyncClientBuilder httpClientBuilder) {
+							return httpClientBuilder
+									.setDefaultCredentialsProvider(credentialsProvider);
+						}
+					});
+
+			RestClient restClient = builder.build();
+
+			ElasticsearchTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
+
+			ElasticsearchClient client = new ElasticsearchClient(transport);
+
+			return client;
 		});
 	}
 
@@ -232,22 +264,29 @@ public class ElasticStorageImpl implements StorageImpl {
 	public void destroy() {
 		clients.values().forEach(client -> {
 			try {
-				client.close();
+				client._transport().close();
 			} catch (IOException e) {
 				LOG.error("Failed to close elastic client", e);
 			}
 		});
 	}
 
-	private void applyAuthentication(RestClientBuilder restClientBuilder, String user, String password) {
-		final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(user, password));
-		restClientBuilder.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
-			@Override
-			public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
-				return httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider);
-			}
-		});
+	private static Property getPropertyFromCft(CustomFieldTemplate cft) {
+		Property.Builder propertyBuilder = new Property.Builder();
+
+		switch (cft.getFieldType()) {
+			case LONG:
+				LongNumberProperty longNumberProperty = new LongNumberProperty.Builder()
+					.build();
+				propertyBuilder.long_(longNumberProperty);
+				break;
+
+			default:
+				break;
+		}
+
+
+		return propertyBuilder.build();
 	}
 
 }
