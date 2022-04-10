@@ -1,0 +1,8 @@
+{
+    "code": "elastiUsername",
+    "description": "Username to connect to elastic server",
+    "fieldType": "STRING",
+    "appliesTo": "REPO",
+    "storageType": "SINGLE",
+    "maxValue": 255
+}

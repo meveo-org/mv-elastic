@@ -1,0 +1,8 @@
+{
+    "code": "elasticPort",
+    "description": "Port of elastic server",
+    "fieldType": "LONG",
+    "appliesTo": "REPO",
+    "storageType": "SINGLE",
+    "maxValue": 100000
+}
