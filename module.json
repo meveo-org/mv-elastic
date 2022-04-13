@@ -1,0 +1,9 @@
+{
+    "code" : "mv-elastic",
+    "description" : "Elastic storage implementation for meveo",
+    "license" : "GPL",
+    "currentVersion" : "1.0.0",
+    "isInDraft" : true,
+    "moduleDependencies" : [ ],
+    "moduleFiles" : [ ]
+  }
