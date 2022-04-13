@@ -1,8 +1,9 @@
 {
     "code": "elasticHost",
-    "description": "Hostname of elastic server",
+    "description": "Hostname",
     "fieldType": "STRING",
     "appliesTo": "REPO",
     "storageType": "SINGLE",
+    "guiPosition" : "tab:Elastic Search:1;field:0",
     "maxValue": 255
 }

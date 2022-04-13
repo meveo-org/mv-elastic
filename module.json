@@ -5,5 +5,8 @@
     "currentVersion" : "1.0.0",
     "isInDraft" : true,
     "moduleDependencies" : [ ],
-    "moduleFiles" : [ ]
+    "moduleFiles" : [ ],
+    "script": {
+      "code": "org.meveo.elastic.InstallationScript"
+    }
   }

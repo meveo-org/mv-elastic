@@ -1,0 +1,11 @@
+{
+    "code" : "org.meveo.elastic.InstallationScript",
+    "inputs" : [],
+    "generateOutputs" : false,
+    "type" : "JAVA",
+    "transactionType" : "SAME",
+    "executionRoles" : [ ],
+    "sourcingRoles" : [ ],
+    "mavenDependencies" : [ ],
+    "importScriptInstances" : [ ]
+  }

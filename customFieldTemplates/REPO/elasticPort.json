@@ -1,8 +1,9 @@
 {
     "code": "elasticPort",
-    "description": "Port of elastic server",
+    "description": "Port number",
     "fieldType": "LONG",
     "appliesTo": "REPO",
     "storageType": "SINGLE",
+    "guiPosition" : "tab:Elastic Search:1;field:1",
     "maxValue": 100000
 }

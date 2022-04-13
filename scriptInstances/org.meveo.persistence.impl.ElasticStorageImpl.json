@@ -1,0 +1,11 @@
+{
+    "code" : "org.meveo.persistence.impl.ElasticStorageImpl",
+    "inputs" : [],
+    "generateOutputs" : false,
+    "type" : "JAVA",
+    "transactionType" : "SAME",
+    "executionRoles" : [ ],
+    "sourcingRoles" : [ ],
+    "mavenDependencies" : [ ],
+    "importScriptInstances" : [ ]
+  }

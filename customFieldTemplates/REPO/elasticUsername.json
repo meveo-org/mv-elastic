@@ -1,8 +1,9 @@
 {
-    "code": "elastiUsername",
-    "description": "Username to connect to elastic server",
+    "code": "elasticUsername",
+    "description": "Username",
     "fieldType": "STRING",
     "appliesTo": "REPO",
     "storageType": "SINGLE",
+    "guiPosition" : "tab:Elastic Search:1;field:2",
     "maxValue": 255
 }
