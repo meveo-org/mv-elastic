@@ -36,6 +36,7 @@ import org.meveo.model.storage.Repository;
 import org.meveo.persistence.PersistenceActionResult;
 import org.meveo.persistence.StorageImpl;
 import org.meveo.persistence.StorageQuery;
+import org.meveo.service.crm.impl.CustomFieldInstanceService;
 import org.meveo.service.crm.impl.CustomFieldTemplateService;
 import org.meveo.service.script.Script;
 import org.slf4j.Logger;
@@ -64,6 +65,8 @@ import co.elastic.clients.transport.rest_client.RestClientTransport;
 public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	private CustomFieldTemplateService cftService = getCDIBean(CustomFieldTemplateService.class);
+	
+	private CustomFieldInstanceService cfiService = getCDIBean(CustomFieldInstanceService.class);
 
 	private Map<String, ElasticsearchClient> clients = new ConcurrentHashMap<String, ElasticsearchClient>();
 
@@ -390,11 +393,10 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	@Override
 	public <T> T beginTransaction(Repository repository, int stackedCalls) {
 		return (T) clients.computeIfAbsent(repository.getCode(), code -> {
-			var cfValues = repository.getCfValues();
-			String elasticHost = cfValues.getCfValue("elasticHost").getStringValue();
-			int elasticPort = cfValues.getCfValue("elasticPort").getLongValue().intValue();
-			String elasticUsername = cfValues.getCfValue("elasticUsername").getStringValue();
-			String elasticPassword = cfValues.getCfValue("elasticPassword").getStringValue(); // TODO: Decrypt password
+			String elasticHost = (String) cfiService.getCFValue(repository, "elasticHost");
+			int elasticPort = ((Long) cfiService.getCFValue(repository, "elasticPort")).intValue();
+			String elasticUsername = (String) cfiService.getCFValue(repository, "elasticUsername");
+			String elasticPassword = (String) cfiService.getCFValue(repository, "elasticPassword");
 
 			final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
 
