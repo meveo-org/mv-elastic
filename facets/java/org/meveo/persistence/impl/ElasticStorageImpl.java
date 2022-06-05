@@ -1,6 +1,3 @@
-/**
- * 
- */
 package org.meveo.persistence.impl;
 
 import java.io.File;
@@ -11,27 +8,34 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import javax.enterprise.context.RequestScoped;
+import javax.ws.rs.client.Client;
+import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.Invocation;
+import javax.ws.rs.client.WebTarget;
 
-import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestClientBuilder.HttpClientConfigCallback;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.apache.commons.httpclient.HttpHost;
+import org.apache.commons.httpclient.UsernamePasswordCredentials;
+import org.apache.commons.httpclient.auth.AuthScope;
+import org.apache.commons.httpclient.auth.CredentialsProvider;
+import org.apache.http.HttpEntity;
+import org.jboss.resteasy.client.jaxrs.BasicAuthentication;
 import org.meveo.admin.exception.BusinessException;
 import org.meveo.admin.util.pagination.PaginationConfiguration;
 import org.meveo.api.exception.EntityDoesNotExistsException;
+import org.meveo.elastic.ElasticRestClient;
 import org.meveo.model.crm.CustomFieldTemplate;
 import org.meveo.model.customEntities.CustomEntityInstance;
 import org.meveo.model.customEntities.CustomEntityTemplate;
 import org.meveo.model.customEntities.CustomModelObject;
 import org.meveo.model.customEntities.CustomRelationshipTemplate;
 import org.meveo.model.persistence.DBStorageType;
+import org.meveo.model.persistence.JacksonUtil;
 import org.meveo.model.storage.Repository;
 import org.meveo.persistence.PersistenceActionResult;
 import org.meveo.persistence.StorageImpl;
@@ -42,25 +46,6 @@ import org.meveo.service.script.Script;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.ElasticsearchException;
-import co.elastic.clients.elasticsearch._types.FieldValue;
-import co.elastic.clients.elasticsearch._types.mapping.LongNumberProperty;
-import co.elastic.clients.elasticsearch._types.mapping.Property;
-import co.elastic.clients.elasticsearch._types.mapping.TextProperty;
-import co.elastic.clients.elasticsearch._types.mapping.WildcardProperty;
-import co.elastic.clients.elasticsearch.core.DeleteRequest;
-import co.elastic.clients.elasticsearch.core.ExistsRequest;
-import co.elastic.clients.elasticsearch.core.IndexRequest;
-import co.elastic.clients.elasticsearch.core.SearchRequest;
-import co.elastic.clients.elasticsearch.core.UpdateRequest;
-import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
-import co.elastic.clients.elasticsearch.indices.DeleteIndexRequest;
-import co.elastic.clients.elasticsearch.indices.PutMappingRequest;
-import co.elastic.clients.json.jackson.JacksonJsonpMapper;
-import co.elastic.clients.transport.ElasticsearchTransport;
-import co.elastic.clients.transport.rest_client.RestClientTransport;
-
 @RequestScoped
 public class ElasticStorageImpl extends Script implements StorageImpl {
 
@@ -68,7 +53,7 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	
 	private CustomFieldInstanceService cfiService = getCDIBean(CustomFieldInstanceService.class);
 
-	private Map<String, ElasticsearchClient> clients = new ConcurrentHashMap<String, ElasticsearchClient>();
+	private Map<String, ElasticRestClient> clients = new ConcurrentHashMap<>();
 
 	private static Logger LOG = LoggerFactory.getLogger(ElasticStorageImpl.class);
 
@@ -80,120 +65,113 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public boolean exists(Repository repository, CustomEntityTemplate cet, String uuid) {
-		ElasticsearchClient client = beginTransaction(repository, 0);
+		ElasticRestClient client = beginTransaction(repository, 0);
 
-		ExistsRequest request = new ExistsRequest.Builder()
-			.index(cet.getCode())
-			.id(uuid)
-			.build();
+		int status = client.head("/%s/%s", cet.getCode().toLowerCase(), uuid);
 
-		try {
-			return client.exists(request).value();
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to execute reqeust", e);
-			return false;
-		}
+		return status == 200;
 	}
 
-	private SearchRequest buildSearchRequest(StorageQuery query, Map<String, CustomFieldTemplate> fields) {
-		return new SearchRequest.Builder()
-			.index(query.getCet().getCode())
-			.query(builder -> {
-				builder.bool(boolQuery -> {
-					boolQuery.filter(filterQuery -> {
-						query.getFilters().forEach((field, value) -> {
-							var cft = fields.get(field);
-							switch (cft.getFieldType()) {
-								case TEXT_AREA:
-								case LONG_TEXT:
-								case STRING:
-									filterQuery.match(matchBuilder -> matchBuilder.field(field)
-										.query(q -> q.stringValue((String) value)));
-								default:
-									break;
-							}
-						});
-						return filterQuery;
-					});
-					return boolQuery;
-				});
-				return builder;
-			}).build();
+	private String buildSearchRequest(StorageQuery query, Map<String, CustomFieldTemplate> fields) {
+		var json = JacksonUtil.OBJECT_MAPPER.createObjectNode();
+
+		var queries = json.putObject("query")
+			.putObject("bool")
+			.putArray("must");
+
+		query.getFilters().forEach((filterKey, filterValue) -> {
+			if (!filterKey.equals("uuid")) {
+				queries.addObject()
+					.putObject("match")
+					.put(filterKey.toLowerCase(), String.valueOf(filterValue));
+			}
+		});
+		
+		return json.toString();
 	}
 
 	@Override
 	public String findEntityIdByValues(Repository repository, CustomEntityInstance cei) {
-		StorageQuery query = new StorageQuery();
-		query.setCet(cei.getCet());
-		query.setFilters(cei.getCfValuesAsValues(storageType(), cei.getFieldTemplates().values(), true));
-
-		SearchRequest request = buildSearchRequest(query, cei.getFieldTemplates());
-
-		ElasticsearchClient client = beginTransaction(repository, 0);
-		try {
-			var response = client.search(request, Map.class);
-			if (!response.hits().hits().isEmpty()) {
-				return response.hits().hits().get(0).id();
-			} else {
-				return null;
-			}
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to retrieve id", e);
-		}
-
 		return null;
+		// StorageQuery query = new StorageQuery();
+		// query.setCet(cei.getCet());
+		// query.setFilters(cei.getCfValuesAsValues(storageType(), cei.getFieldTemplates().values(), true));
+
+		// SearchRequest request = buildSearchRequest(query, cei.getFieldTemplates());
+
+		// ElasticsearchClient client = beginTransaction(repository, 0);
+		// try {
+		// 	var response = client.search(request, Map.class);
+		// 	if (!response.hits().hits().isEmpty()) {
+		// 		return response.hits().hits().get(0).id();
+		// 	} else {
+		// 		return null;
+		// 	}
+		// } catch (IOException e) {
+		// 	LOG.error("Failed to retrieve id", e);
+		// }
+
+		// return null;
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
 	public Map<String, Object> findById(Repository repository, CustomEntityTemplate cet, String uuid,
 			Map<String, CustomFieldTemplate> cfts, Collection<String> fetchFields, boolean withEntityReferences) {
+			
+		return null;
+		// SearchRequest request = new SearchRequest.Builder()
+		// 		.index(cet.getCode())
+		// 		.query(builder -> builder.term(term -> term.field("_id").value(uuid)))
+		// 		.build();
 
-		SearchRequest request = new SearchRequest.Builder()
-				.index(cet.getCode())
-				.query(builder -> builder.term(term -> term.field("_id").value(FieldValue.of(uuid))))
-				.build();
+		// ElasticsearchClient client = beginTransaction(repository, 0);
 
-		ElasticsearchClient client = beginTransaction(repository, 0);
-
-		try {
-			var response = client.search(request, Map.class);
-			if (!response.hits().hits().isEmpty()) {
-				return response.hits().hits().get(0).source();
-			} else {
-				return null;
-			}
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to retrieve value", e);
-			return null;
-		}
+		// try {
+		// 	var response = client.search(request, Map.class);
+		// 	if (!response.hits().hits().isEmpty()) {
+		// 		return response.hits().hits().get(0).source();
+		// 	} else {
+		// 		return null;
+		// 	}
+		// } catch (IOException e) {
+		// 	LOG.error("Failed to retrieve value", e);
+		// 	return null;
+		// }
 	}
 
 	@Override
 	public List<Map<String, Object>> find(StorageQuery query) throws EntityDoesNotExistsException {
+		ElasticRestClient client = beginTransaction(query.getRepository(), 0);
 		var fieldsTemplates = cftService.findByAppliesTo(query.getCet().getAppliesTo());
-		SearchRequest request = buildSearchRequest(query, fieldsTemplates);
 
-		ElasticsearchClient client = beginTransaction(query.getRepository(), 0);
-		try {
-			var response = client.search(request, Map.class);
-			if (!response.hits().hits().isEmpty()) {
-				return response.hits().hits()
-					.stream()
-					.map(hit -> hit.fields()
-						.entrySet()
-						.stream()
-						.collect(Collectors.toMap(entry -> entry.getKey(), entry -> entry.getValue().to(Object.class)))
-					).collect(Collectors.toList());
+		var get = client.get("/%s/_search", query.getCet().getCode().toLowerCase());
+		client.setBody(get, buildSearchRequest(query, fieldsTemplates));
 
-			} else {
+		return (List<Map<String, Object>>) client.execute(get, response -> {
+			var mapper = JacksonUtil.OBJECT_MAPPER;
+			try {
+				var responseJson =  mapper.readTree(response.getEntity().getContent());
+				LOG.info("Search result = " + responseJson);
+				
+				var hits = responseJson.get("hits").get("hits");
+
+				return StreamSupport.stream(hits.spliterator(), false)
+					.map(node -> {
+						Map<String, Object> hit = new HashMap<>();
+						hit.put("uuid", node.get("_id").asText());
+						hit.putAll(mapper.convertValue(node.get("_source"), Map.class));
+						return hit;
+					})
+					.collect(Collectors.toList());
+
+				// return null;
+			} catch (UnsupportedOperationException | IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 				return null;
 			}
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to retrieve data", e);
-		}
-
-		return null;
+		});
 	}
 
 	@Override
@@ -204,22 +182,27 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			this.update(repository, cei);
 			return new PersistenceActionResult(cei.getUuid());
 		} else {
-			var request = new IndexRequest.Builder<>()
-				.index(cei.getCetCode())
-				.document(cei.getValues(storageType()))
-				.build();
 
-			ElasticsearchClient client = beginTransaction(repository, 0);
+			ElasticRestClient client = beginTransaction(repository, 0);
 
-			try {
-				var response = client.index(request);
-				return new PersistenceActionResult(response.id());
-			} catch (ElasticsearchException | IOException e) {
-				LOG.error("Failed to create data", e);
-			}
+			var put = client.put("/%s/_create/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
+			client.setBody(put, JacksonUtil.toString(cei.getValues(storageType())));
+			return client.execute(put, response -> {
+				try {
+					var json = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+					if (json.get("result").asText().equals("created")) {
+						return new PersistenceActionResult(json.get("_id").asText());
+					} else {
+						//TODO
+						return null;
+					}
+				} catch (UnsupportedOperationException | IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+					return null;
+				}
+			});
 		}
-
-		return null;
 	}
 
 	@Override
@@ -230,19 +213,19 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void update(Repository repository, CustomEntityInstance cei) throws BusinessException {
-		var request = new UpdateRequest.Builder<>()
-				.index(cei.getCetCode())
-				.doc(cei.getValues(storageType()))
-				.id(cei.getUuid())
-				.build();
+		// var request = new UpdateRequest.Builder<>()
+		// 		.index(cei.getCetCode())
+		// 		.doc(cei.getValues(storageType()))
+		// 		.id(cei.getUuid())
+		// 		.build();
 
-		ElasticsearchClient client = beginTransaction(repository, 0);
+		// ElasticsearchClient client = beginTransaction(repository, 0);
 
-		try {
-			client.update(request, Object.class);
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to update data", e);
-		}
+		// try {
+		// 	client.update(request, Object.class);
+		// } catch (IOException e) {
+		// 	LOG.error("Failed to update data", e);
+		// }
 	}
 
 	@Override
@@ -253,81 +236,74 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void remove(Repository repository, CustomEntityTemplate cet, String uuid) throws BusinessException {
-		var request = new DeleteRequest.Builder()
-			.index(cet.getCode())
-			.id(uuid)
-			.build();
+		// var request = new DeleteRequest.Builder()
+		// 	.index(cet.getCode())
+		// 	.id(uuid)
+		// 	.build();
 
-		ElasticsearchClient client = beginTransaction(repository, 0);
-		try {
-			client.delete(request);
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to delete data", e);
-		}
+		// ElasticsearchClient client = beginTransaction(repository, 0);
+		// try {
+		// 	client.delete(request);
+		// } catch (IOException e) {
+		// 	LOG.error("Failed to delete data", e);
+		// }
 	}
 
 	@Override
 	public Integer count(Repository repository, CustomEntityTemplate cet,
 			PaginationConfiguration paginationConfiguration) {
 		
-		Map<String, Object> filters = new HashMap<>(paginationConfiguration.getFilters());
-		Map<String, CustomFieldTemplate> cfts = cftService.findByAppliesTo(cet.getAppliesTo());
+				return 10;
+		// Map<String, Object> filters = new HashMap<>(paginationConfiguration.getFilters());
+		// Map<String, CustomFieldTemplate> cfts = cftService.findByAppliesTo(cet.getAppliesTo());
 
-		cfts.values().forEach(cft -> {
-			if (!cft.getStorages().contains(storageType())) {
-				filters.remove(cft.getCode());
-			}
-		});
-		StorageQuery query = new StorageQuery();
-		query.setCet(cet);
-		query.setFilters(filters);
+		// cfts.values().forEach(cft -> {
+		// 	if (!cft.getStorages().contains(storageType())) {
+		// 		filters.remove(cft.getCode());
+		// 	}
+		// });
+		// StorageQuery query = new StorageQuery();
+		// query.setCet(cet);
+		// query.setFilters(filters);
 
-		SearchRequest request = buildSearchRequest(query, cfts);
+		// SearchRequest request = buildSearchRequest(query, cfts);
 
-		ElasticsearchClient client = beginTransaction(query.getRepository(), 0);
+		// ElasticsearchClient client = beginTransaction(query.getRepository(), 0);
 
-		//TODO: Use CountResquest
-		try {
-			var response = client.search(request, Map.class);
-			return Long.valueOf(response.hits().total().value()).intValue();
-		} catch (ElasticsearchException | IOException e) {
-			LOG.error("Failed to retrieve data", e);
-		}
+		// //TODO: Use CountResquest
+		// try {
+		// 	var response = client.search(request, Map.class);
+		// 	return Long.valueOf(response.hits().total().value()).intValue();
+		// } catch (IOException e) {
+		// 	LOG.error("Failed to retrieve data", e);
+		// }
 
-		return null;
+		// return null;
 	}
 
 	@Override
 	public void cetCreated(CustomEntityTemplate cet) {
 		for (var repository : cet.getRepositories()) {
-			ElasticsearchClient client = beginTransaction(repository, 0);
-
-			CreateIndexRequest request = new CreateIndexRequest.Builder()
-				.index(cet.getCode())
-				.build();
-
-			try {
-				client.indices().create(request);
-			} catch (IOException e) {
-				LOG.error("Failed to create index for {}", cet.getCode());
-			}
+			ElasticRestClient client = beginTransaction(repository, 0);
+			var request = client.put("/%s", cet.getCode().toLowerCase());
+			client.execute(request, null);
 		}
 	}
 
 	@Override
 	public void removeCet(CustomEntityTemplate cet) {
-		for (var repository : cet.getRepositories()) {
-			ElasticsearchClient client = beginTransaction(repository, 0);
-			DeleteIndexRequest request = new DeleteIndexRequest.Builder()
-				.index(cet.getCode())
-				.build();
+		// for (var repository : cet.getRepositories()) {
+		// 	ElasticsearchClient client = beginTransaction(repository, 0);
+		// 	DeleteIndexRequest request = new DeleteIndexRequest.Builder()
+		// 		.index(cet.getCode())
+		// 		.build();
 
-			try {
-				client.indices().delete(request);
-			} catch (IOException e) {
-				LOG.error("Failed to delete index for {}", cet.getCode());
-			}
-		}
+		// 	try {
+		// 		client.indices().delete(request);
+		// 	} catch (IOException e) {
+		// 		LOG.error("Failed to delete index for {}", cet.getCode());
+		// 	}
+		// }
 	}
 
 	@Override
@@ -339,18 +315,16 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	@Override
 	public void cftCreated(CustomModelObject template, CustomFieldTemplate cft) {
 		for (var repository : template.getRepositories()) {
-			ElasticsearchClient client = beginTransaction(repository, 0);
+			ElasticRestClient client = beginTransaction(repository, 0);
 
-			PutMappingRequest request = new PutMappingRequest.Builder()
-				.properties(Map.of(cft.getCode(), getPropertyFromCft(cft)))
-				.type(template.getCode())
-				.build();
+			Map<String, Object> mapping = new HashMap<>();
+			mapping.put("properties", 
+				Map.of(cft.getCode().toLowerCase(), getPropertyFromCft(cft))
+			);
 
-			try {
-				client.indices().putMapping(request);
-			} catch (IOException e) {
-				LOG.error("Failed to create mapping for {}", template.getCode());
-			}
+			var request = client.put("/%s/_mapping", template.getCode().toLowerCase());
+			client.setBody(request, JacksonUtil.toString(mapping));
+			client.execute(request, null);
 		}
 
 	}
@@ -398,28 +372,7 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			String elasticUsername = (String) cfiService.getCFValue(repository, "elasticUsername");
 			String elasticPassword = (String) cfiService.getCFValue(repository, "elasticPassword");
 
-			final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-
-			credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(elasticUsername, elasticPassword));
-
-			RestClientBuilder builder = RestClient.builder(
-					new HttpHost(elasticHost, elasticPort))
-					.setHttpClientConfigCallback(new HttpClientConfigCallback() {
-						@Override
-						public HttpAsyncClientBuilder customizeHttpClient(
-								HttpAsyncClientBuilder httpClientBuilder) {
-							return httpClientBuilder
-									.setDefaultCredentialsProvider(credentialsProvider);
-						}
-					});
-
-			RestClient restClient = builder.build();
-
-			ElasticsearchTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
-
-			ElasticsearchClient client = new ElasticsearchClient(transport);
-
-			return client;
+			return new ElasticRestClient(elasticHost, elasticPort, elasticUsername, elasticPassword);
 		});
 	}
 
@@ -436,37 +389,34 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	@Override
 	public void destroy() {
 		clients.values().forEach(client -> {
-			try {
-				client._transport().close();
-			} catch (IOException e) {
-				LOG.error("Failed to close elastic client", e);
-			}
+			client.close();
 		});
 	}
 
-	private static Property getPropertyFromCft(CustomFieldTemplate cft) {
-		Property.Builder propertyBuilder = new Property.Builder();
+	private static Map<String, Object> getPropertyFromCft(CustomFieldTemplate cft) {
+		Map<String, Object> property = new HashMap<>();
 
 		switch (cft.getFieldType()) {
 			case LONG:
-				LongNumberProperty longNumberProperty = new LongNumberProperty.Builder()
-					.build();
-				propertyBuilder.long_(longNumberProperty);
-				break;
+				// LongNumberProperty longNumberProperty = new LongNumberProperty.Builder()
+				// 	.build();
+				// propertyBuilder.long_(longNumberProperty);
+				// break;
 
 			case LONG_TEXT:
 			case TEXT_AREA:
-				TextProperty textProperty = new TextProperty.Builder().build();
-				propertyBuilder.text(textProperty);
+				// "text"
+				property.put("type", "text");
 				break;
 			case STRING:
-				propertyBuilder.wildcard(new WildcardProperty.Builder().build());
+				// search_as_you_type
+				property.put("type", "search_as_you_type");
 				break;
 			default:
 				break;
 		}
 
-		return propertyBuilder.build();
+		return property;
 	}
 
 }

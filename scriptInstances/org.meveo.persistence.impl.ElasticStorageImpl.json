@@ -6,10 +6,6 @@
     "transactionType" : "SAME",
     "executionRoles" : [ ],
     "sourcingRoles" : [ ],
-    "mavenDependencies" : [ {
-      "groupId": "co.elastic.clients",
-      "artifactId": "elasticsearch-java",
-      "version": "7.16.3"
-    }],
+    "mavenDependencies" : [],
     "importScriptInstances" : [ ]
   }
