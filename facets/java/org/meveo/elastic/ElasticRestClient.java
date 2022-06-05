@@ -9,6 +9,7 @@ import org.apache.http.auth.Credentials;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpHead;
 import org.apache.http.client.methods.HttpPost;
@@ -44,6 +45,11 @@ public class ElasticRestClient {
             // TODO Auto-generated catch block
             e.printStackTrace();
         }
+    }
+
+    public int delete(String relativeTargetFormat, Object... args) {
+        var httpHead = new HttpDelete(baseUri + String.format(relativeTargetFormat, args));
+        return this.execute(httpHead, response -> response.getStatusLine().getStatusCode());
     }
 
     public int head(String relativeTargetFormat, Object... args) {

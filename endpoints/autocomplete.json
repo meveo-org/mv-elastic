@@ -1,0 +1,34 @@
+{
+    "code": "autocomplete",
+    "secured": true,
+    "checkPathParams": true,
+    "serviceCode": "org.meveo.endpoints.AutoCompleteEndpointScript",
+    "synchronous": true,
+    "method": "POST",
+    "parameterMappings": [
+        {
+            "serviceParameter": "query",
+            "multivalued": false,
+            "parameterName": "query",
+            "defaultValue": "my_value",
+            "valueRequired": false
+        },
+        {
+            "serviceParameter": "repository",
+            "multivalued": false,
+            "parameterName": "repository",
+            "defaultValue": "default",
+            "valueRequired": false
+        }
+    ],
+    "pathParameters": [
+        "entity",
+        "field"
+    ],
+    "roles": [],
+    "returnedVariableName": "output",
+    "serializeResult": true,
+    "contentType": "application/json",
+    "basePath": "autocomplete",
+    "path": "/{entity}/{field}"
+}

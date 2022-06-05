@@ -11,24 +11,11 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import javax.enterprise.context.RequestScoped;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.client.Invocation;
-import javax.ws.rs.client.WebTarget;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import org.apache.commons.httpclient.HttpHost;
-import org.apache.commons.httpclient.UsernamePasswordCredentials;
-import org.apache.commons.httpclient.auth.AuthScope;
-import org.apache.commons.httpclient.auth.CredentialsProvider;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.http.HttpEntity;
 import org.apache.http.ParseException;
 import org.apache.http.util.EntityUtils;
-import org.jboss.resteasy.client.jaxrs.BasicAuthentication;
 import org.meveo.admin.exception.BusinessException;
 import org.meveo.admin.util.pagination.PaginationConfiguration;
 import org.meveo.api.exception.EntityDoesNotExistsException;
@@ -66,6 +53,37 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		DBStorageType dbStorageType = new DBStorageType();
 		dbStorageType.setCode("ELASTIC");
 		return dbStorageType;
+	}
+
+	public List<String> autoComplete(Repository repository, String cet, String cft, String query) {
+		ElasticRestClient client = beginTransaction(repository, 0);
+
+		var queryJson = JacksonUtil.OBJECT_MAPPER.createObjectNode();
+		queryJson.putObject("query")
+			.putObject("multi_match")
+			.put("query", query)
+			.put("type", "phrase_prefix")
+			.putArray("fields")
+			.add(cft.toLowerCase())
+			.add(cft.toLowerCase() + "._2gram")
+			.add(cft.toLowerCase() + "._3gram");
+
+		var request = client.get("/%s/_search", cet.toLowerCase());
+		client.setBody(request, queryJson.toString());
+
+		LOG.info("Autocomplete query = {}", queryJson);
+
+		return client.execute(request, response -> {
+			try {
+				var responseJson = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+				return responseJson.get("hits").get("hits").findValuesAsText(cft.toLowerCase());
+			} catch (UnsupportedOperationException | IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+			return null;
+		});
 	}
 
 	@Override
@@ -282,49 +300,40 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void remove(Repository repository, CustomEntityTemplate cet, String uuid) throws BusinessException {
-		// var request = new DeleteRequest.Builder()
-		// 	.index(cet.getCode())
-		// 	.id(uuid)
-		// 	.build();
-
-		// ElasticsearchClient client = beginTransaction(repository, 0);
-		// try {
-		// 	client.delete(request);
-		// } catch (IOException e) {
-		// 	LOG.error("Failed to delete data", e);
-		// }
+		ElasticRestClient client = beginTransaction(repository, 0);
+		client.delete("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
 	}
 
 	@Override
-	public Integer count(Repository repository, CustomEntityTemplate cet,
-			PaginationConfiguration paginationConfiguration) {
-		
-				return 10;
-		// Map<String, Object> filters = new HashMap<>(paginationConfiguration.getFilters());
-		// Map<String, CustomFieldTemplate> cfts = cftService.findByAppliesTo(cet.getAppliesTo());
+	public Integer count(Repository repository, CustomEntityTemplate cet, PaginationConfiguration paginationConfiguration) {
+		final Map<String, CustomFieldTemplate> fields = cftService.getCftsWithInheritedFields(cet);
+		final Map<String, Object> filters = paginationConfiguration == null ? null : paginationConfiguration.getFilters();
 
-		// cfts.values().forEach(cft -> {
-		// 	if (!cft.getStorages().contains(storageType())) {
-		// 		filters.remove(cft.getCode());
-		// 	}
-		// });
-		// StorageQuery query = new StorageQuery();
-		// query.setCet(cet);
-		// query.setFilters(filters);
+		StorageQuery query = new StorageQuery();
+		query.setCet(cet);
+		query.setFilters(filters);
+		query.setPaginationConfiguration(paginationConfiguration);
+		query.setRepository(repository);
 
-		// SearchRequest request = buildSearchRequest(query, cfts);
+		ElasticRestClient client = beginTransaction(query.getRepository(), 0);
+		var fieldsTemplates = cftService.findByAppliesTo(query.getCet().getAppliesTo());
 
-		// ElasticsearchClient client = beginTransaction(query.getRepository(), 0);
+		var get = client.get("/%s/_count", query.getCet().getCode().toLowerCase());
+		client.setBody(get, buildSearchRequest(query, fieldsTemplates));
 
-		// //TODO: Use CountResquest
-		// try {
-		// 	var response = client.search(request, Map.class);
-		// 	return Long.valueOf(response.hits().total().value()).intValue();
-		// } catch (IOException e) {
-		// 	LOG.error("Failed to retrieve data", e);
-		// }
+		return client.execute(get, response -> {
+			var mapper = JacksonUtil.OBJECT_MAPPER;
+			try {
+				var responseJson =  mapper.readTree(response.getEntity().getContent());
+				LOG.info("Count result = {}", responseJson);
+				return responseJson.get("count").asInt();
 
-		// return null;
+			} catch (UnsupportedOperationException | IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				return null;
+			}
+		});
 	}
 
 	@Override
