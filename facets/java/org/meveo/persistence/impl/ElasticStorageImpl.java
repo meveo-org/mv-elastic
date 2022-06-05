@@ -17,6 +17,7 @@ import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.Invocation;
 import javax.ws.rs.client.WebTarget;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.apache.commons.httpclient.HttpHost;
@@ -114,30 +115,53 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		// return null;
 	}
 
-	@SuppressWarnings("unchecked")
+	private Map<String, Object> mapHitToCfts(JsonNode hit, Collection<CustomFieldTemplate> cfts) {
+		Map<String, Object> resultData = new HashMap<>();
+		resultData.put("uuid", hit.get("_id").asText());
+		var _source = hit.get("_source");
+
+		cfts.forEach((cft) -> {
+			var fieldValue = _source.get(cft.getCode().toLowerCase());
+			if (fieldValue != null) {
+				Object convertedValue; 
+				switch (cft.getFieldType()) {
+					case DOUBLE:
+						convertedValue = fieldValue.asDouble();
+						break;
+					case LONG: 
+						convertedValue = fieldValue.asLong();
+						break;
+					case BOOLEAN:
+						convertedValue = fieldValue.asBoolean();
+					default:
+						convertedValue = fieldValue.asText();
+				}
+				resultData.put(cft.getCode(), convertedValue);
+			}
+		});
+
+		return resultData;
+	}
+
 	@Override
 	public Map<String, Object> findById(Repository repository, CustomEntityTemplate cet, String uuid,
 			Map<String, CustomFieldTemplate> cfts, Collection<String> fetchFields, boolean withEntityReferences) {
 			
-		return null;
-		// SearchRequest request = new SearchRequest.Builder()
-		// 		.index(cet.getCode())
-		// 		.query(builder -> builder.term(term -> term.field("_id").value(uuid)))
-		// 		.build();
+		ElasticRestClient client = beginTransaction(repository, 0);
+		var request = client.get("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
+		return client.execute(request, response -> {
+			try {
+				var responseJson =  JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+				LOG.info("Find by id {} = {}", uuid, responseJson);
+				return mapHitToCfts(responseJson, cfts.values());
 
-		// ElasticsearchClient client = beginTransaction(repository, 0);
+			} catch (UnsupportedOperationException | IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 
-		// try {
-		// 	var response = client.search(request, Map.class);
-		// 	if (!response.hits().hits().isEmpty()) {
-		// 		return response.hits().hits().get(0).source();
-		// 	} else {
-		// 		return null;
-		// 	}
-		// } catch (IOException e) {
-		// 	LOG.error("Failed to retrieve value", e);
-		// 	return null;
-		// }
+			return null;
+		});
 	}
 
 	@Override
@@ -157,15 +181,9 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 				var hits = responseJson.get("hits").get("hits");
 
 				return StreamSupport.stream(hits.spliterator(), false)
-					.map(node -> {
-						Map<String, Object> hit = new HashMap<>();
-						hit.put("uuid", node.get("_id").asText());
-						hit.putAll(mapper.convertValue(node.get("_source"), Map.class));
-						return hit;
-					})
+					.map(node -> mapHitToCfts(node, fieldsTemplates.values()))
 					.collect(Collectors.toList());
 
-				// return null;
 			} catch (UnsupportedOperationException | IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
