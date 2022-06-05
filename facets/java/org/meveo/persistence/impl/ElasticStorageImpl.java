@@ -24,13 +24,17 @@ import org.apache.commons.httpclient.HttpHost;
 import org.apache.commons.httpclient.UsernamePasswordCredentials;
 import org.apache.commons.httpclient.auth.AuthScope;
 import org.apache.commons.httpclient.auth.CredentialsProvider;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpEntity;
+import org.apache.http.ParseException;
+import org.apache.http.util.EntityUtils;
 import org.jboss.resteasy.client.jaxrs.BasicAuthentication;
 import org.meveo.admin.exception.BusinessException;
 import org.meveo.admin.util.pagination.PaginationConfiguration;
 import org.meveo.api.exception.EntityDoesNotExistsException;
 import org.meveo.elastic.ElasticRestClient;
 import org.meveo.model.crm.CustomFieldTemplate;
+import org.meveo.model.crm.custom.CustomFieldTypeEnum;
 import org.meveo.model.customEntities.CustomEntityInstance;
 import org.meveo.model.customEntities.CustomEntityTemplate;
 import org.meveo.model.customEntities.CustomModelObject;
@@ -68,8 +72,8 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	public boolean exists(Repository repository, CustomEntityTemplate cet, String uuid) {
 		ElasticRestClient client = beginTransaction(repository, 0);
 
-		int status = client.head("/%s/%s", cet.getCode().toLowerCase(), uuid);
-
+		int status = client.head("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
+		LOG.info("Entity exists {} = {}", uuid, status == 200);
 		return status == 200;
 	}
 
@@ -81,10 +85,21 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			.putArray("must");
 
 		query.getFilters().forEach((filterKey, filterValue) -> {
-			if (!filterKey.equals("uuid")) {
-				queries.addObject()
-					.putObject("match")
-					.put(filterKey.toLowerCase(), String.valueOf(filterValue));
+			if (!filterKey.equals("uuid") && filterValue != null) {
+				var cft = fields.get(filterKey);
+
+				if (cft.getFieldType() == CustomFieldTypeEnum.STRING) {
+					queries.addObject()
+						.putObject("wildcard")
+						.put(filterKey.toLowerCase(), String.valueOf(filterValue));
+				} else {
+					queries.addObject()
+						.putObject("match")
+						.putObject(filterKey.toLowerCase())
+						.put("query", String.valueOf(filterValue))
+						.put("fuzziness", "AUTO");
+				}
+
 			}
 		});
 		
@@ -93,26 +108,26 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public String findEntityIdByValues(Repository repository, CustomEntityInstance cei) {
+		StorageQuery query = new StorageQuery();
+		query.setCet(cei.getCet());
+		query.setRepository(repository);
+		query.setFilters(cei.getCfValuesAsValues(storageType(), cei.getFieldTemplates().values(), true));
+
+		try {
+			var result = this.find(query);
+			if (result.size() == 1) {
+				return (String) result.get(0).get("uuid");
+			} else {
+				//TODO
+				return null;
+			}
+
+		} catch (EntityDoesNotExistsException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
 		return null;
-		// StorageQuery query = new StorageQuery();
-		// query.setCet(cei.getCet());
-		// query.setFilters(cei.getCfValuesAsValues(storageType(), cei.getFieldTemplates().values(), true));
-
-		// SearchRequest request = buildSearchRequest(query, cei.getFieldTemplates());
-
-		// ElasticsearchClient client = beginTransaction(repository, 0);
-		// try {
-		// 	var response = client.search(request, Map.class);
-		// 	if (!response.hits().hits().isEmpty()) {
-		// 		return response.hits().hits().get(0).id();
-		// 	} else {
-		// 		return null;
-		// 	}
-		// } catch (IOException e) {
-		// 	LOG.error("Failed to retrieve id", e);
-		// }
-
-		// return null;
 	}
 
 	private Map<String, Object> mapHitToCfts(JsonNode hit, Collection<CustomFieldTemplate> cfts) {
@@ -192,6 +207,17 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		});
 	}
 
+	private String getDocBody(CustomEntityInstance cei) {
+		Map<String, Object> body = new HashMap<>();
+
+		cei.getValues(storageType())
+			.forEach((key, value) -> {
+				body.put(key.toLowerCase(), value);
+			});
+
+		return JacksonUtil.toString(body);
+	}
+
 	@Override
 	public PersistenceActionResult createOrUpdate(Repository repository, CustomEntityInstance cei,
 			Map<String, CustomFieldTemplate> customFieldTemplates, String foundUuid) throws BusinessException {
@@ -204,10 +230,11 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			ElasticRestClient client = beginTransaction(repository, 0);
 
 			var put = client.put("/%s/_create/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
-			client.setBody(put, JacksonUtil.toString(cei.getValues(storageType())));
+			client.setBody(put, getDocBody(cei));
 			return client.execute(put, response -> {
 				try {
 					var json = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+					LOG.info("Create response = {}", json);
 					if (json.get("result").asText().equals("created")) {
 						return new PersistenceActionResult(json.get("_id").asText());
 					} else {
@@ -231,19 +258,20 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void update(Repository repository, CustomEntityInstance cei) throws BusinessException {
-		// var request = new UpdateRequest.Builder<>()
-		// 		.index(cei.getCetCode())
-		// 		.doc(cei.getValues(storageType()))
-		// 		.id(cei.getUuid())
-		// 		.build();
+		ElasticRestClient client = beginTransaction(repository, 0);
+		var request = client.put("/%s/_doc/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
+		client.setBody(request, getDocBody(cei));
 
-		// ElasticsearchClient client = beginTransaction(repository, 0);
-
-		// try {
-		// 	client.update(request, Object.class);
-		// } catch (IOException e) {
-		// 	LOG.error("Failed to update data", e);
-		// }
+		String result = client.execute(request, response -> {
+			try {
+				var responseString = EntityUtils.toString(response.getEntity());
+				LOG.info("Update result = {}", responseString);
+			} catch (ParseException | IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			return "ok";
+		});
 	}
 
 	@Override
