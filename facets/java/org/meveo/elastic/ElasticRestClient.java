@@ -21,6 +21,7 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.meveo.admin.exception.BusinessException;
 
 public class ElasticRestClient {
     private CloseableHttpClient client;
@@ -72,8 +73,8 @@ public class ElasticRestClient {
     public HttpPut put(String relativeTargetFormat, Object... args) {
         return new HttpPut(baseUri + String.format(relativeTargetFormat, args));
     }
-
-    public <T> T execute(HttpRequestBase request, Function<CloseableHttpResponse, T> handler) {
+    
+    public <T> T execute(HttpRequestBase request, ResultHandler<T> handler) {
         try {
             try (var response = this.client.execute(request)) {
                 if (handler == null) {
@@ -81,11 +82,65 @@ public class ElasticRestClient {
                 }
                 return handler.apply(response);
             }
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-            return null;
+        } catch (Exception e) {
+        	// TODO Log error ?
+        	return null;
         }
+    }
+    
+    public <T> T execute(HttpRequestBase request, ResultHandler<T> handler, ErrorConsumer errorHandler) {
+        try {
+            try (var response = this.client.execute(request)) {
+                if (handler == null) {
+                    return null;
+                }
+                return handler.apply(response);
+            }
+        } catch (Exception e) {
+        	errorHandler.handle(e);
+        	return null;
+        }
+    }
+
+    public <T> T execute(HttpRequestBase request, ResultHandler<T> handler, ErrorHandler errorHandler) throws BusinessException {
+        try {
+            try (var response = this.client.execute(request)) {
+                if (handler == null) {
+                    return null;
+                }
+                return handler.apply(response);
+            }
+        } catch (Exception e) {
+        	throw errorHandler.handle(e);
+        }
+    }
+    
+    public <T> T execute(HttpRequestBase request, ResultHandler<T> handler, String errorMessage) throws BusinessException {
+    	return execute(request, handler, handleError(errorMessage));
+    }
+    
+    @FunctionalInterface
+    public static interface ResultHandler<T> {
+    	T apply(CloseableHttpResponse e) throws Exception;
+    }
+    
+    @FunctionalInterface
+    public static interface ErrorHandler {
+    	BusinessException handle(Exception e);
+    }
+    
+    @FunctionalInterface
+    public static interface ErrorConsumer {
+    	void handle(Exception e);
+    }
+    
+    public static ErrorHandler handleError(String message) {
+    	return new ErrorHandler() {
+			@Override
+			public BusinessException handle(Exception e) {
+				return new BusinessException(message, e);
+			}
+    	};
     }
     
     private static class HttpGetWithBody extends HttpEntityEnclosingRequestBase {

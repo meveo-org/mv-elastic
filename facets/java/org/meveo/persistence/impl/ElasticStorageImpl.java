@@ -11,11 +11,8 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import javax.enterprise.context.RequestScoped;
+import javax.persistence.PersistenceException;
 
-import com.fasterxml.jackson.databind.JsonNode;
-
-import org.apache.http.ParseException;
-import org.apache.http.util.EntityUtils;
 import org.meveo.admin.exception.BusinessException;
 import org.meveo.admin.util.pagination.PaginationConfiguration;
 import org.meveo.api.exception.EntityDoesNotExistsException;
@@ -38,6 +35,8 @@ import org.meveo.service.script.Script;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 @RequestScoped
 public class ElasticStorageImpl extends Script implements StorageImpl {
 
@@ -55,7 +54,7 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		return dbStorageType;
 	}
 
-	public List<String> autoComplete(Repository repository, String cet, String cft, String query) {
+	public List<String> autoComplete(Repository repository, String cet, String cft, String query) throws BusinessException {
 		ElasticRestClient client = beginTransaction(repository, 0);
 
 		var queryJson = JacksonUtil.OBJECT_MAPPER.createObjectNode();
@@ -74,16 +73,9 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		LOG.info("Autocomplete query = {}", queryJson);
 
 		return client.execute(request, response -> {
-			try {
-				var responseJson = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
-				return responseJson.get("hits").get("hits").findValuesAsText(cft.toLowerCase());
-			} catch (UnsupportedOperationException | IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-
-			return null;
-		});
+			var responseJson = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+			return responseJson.get("hits").get("hits").findValuesAsText(cft.toLowerCase());
+		}, "Failed to read response");
 	}
 
 	@Override
@@ -135,14 +127,12 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			var result = this.find(query);
 			if (result.size() == 1) {
 				return (String) result.get(0).get("uuid");
-			} else {
-				//TODO
-				return null;
+			} else if (result.size() > 1) {
+				throw new PersistenceException("Many possible entity for values " + query.getFilters().toString());
 			}
 
 		} catch (EntityDoesNotExistsException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			throw new PersistenceException("Template does not exists", e);
 		}
 
 		return null;
@@ -183,17 +173,11 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		ElasticRestClient client = beginTransaction(repository, 0);
 		var request = client.get("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
 		return client.execute(request, response -> {
-			try {
-				var responseJson =  JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
-				LOG.info("Find by id {} = {}", uuid, responseJson);
-				return mapHitToCfts(responseJson, cfts.values());
-
-			} catch (UnsupportedOperationException | IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-
-			return null;
+			var responseJson =  JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+			LOG.info("Find by id {} = {}", uuid, responseJson);
+			return mapHitToCfts(responseJson, cfts.values());
+		}, (e) -> {
+			LOG.error("Failed to read response", e);
 		});
 	}
 
@@ -207,21 +191,17 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 		return (List<Map<String, Object>>) client.execute(get, response -> {
 			var mapper = JacksonUtil.OBJECT_MAPPER;
-			try {
-				var responseJson =  mapper.readTree(response.getEntity().getContent());
-				LOG.info("Search result = " + responseJson);
-				
-				var hits = responseJson.get("hits").get("hits");
+			var responseJson =  mapper.readTree(response.getEntity().getContent());
+			LOG.info("Search result = " + responseJson);
+			
+			var hits = responseJson.get("hits").get("hits");
 
-				return StreamSupport.stream(hits.spliterator(), false)
-					.map(node -> mapHitToCfts(node, fieldsTemplates.values()))
-					.collect(Collectors.toList());
+			return StreamSupport.stream(hits.spliterator(), false)
+				.map(node -> mapHitToCfts(node, fieldsTemplates.values()))
+				.collect(Collectors.toList());
 
-			} catch (UnsupportedOperationException | IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				return null;
-			}
+		}, (e) -> {
+			LOG.error("Failed to read response", e);
 		});
 	}
 
@@ -250,21 +230,14 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			var put = client.put("/%s/_create/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
 			client.setBody(put, getDocBody(cei));
 			return client.execute(put, response -> {
-				try {
-					var json = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
-					LOG.info("Create response = {}", json);
-					if (json.get("result").asText().equals("created")) {
-						return new PersistenceActionResult(json.get("_id").asText());
-					} else {
-						//TODO
-						return null;
-					}
-				} catch (UnsupportedOperationException | IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-					return null;
+				var json = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+				LOG.info("Create response = {}", json);
+				if (json.get("result").asText().equals("created")) {
+					return new PersistenceActionResult(json.get("_id").asText());
+				} else {
+					throw new PersistenceException("Elastic response : " + json.toString());
 				}
-			});
+			}, "Failed to create / update data");
 		}
 	}
 
@@ -280,16 +253,24 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 		var request = client.put("/%s/_doc/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
 		client.setBody(request, getDocBody(cei));
 
-		String result = client.execute(request, response -> {
+		boolean result = client.execute(request, response -> {
+			JsonNode json = null;
 			try {
-				var responseString = EntityUtils.toString(response.getEntity());
-				LOG.info("Update result = {}", responseString);
-			} catch (ParseException | IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+				json = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+			} catch (UnsupportedOperationException | IOException e) {
+				return false;
 			}
-			return "ok";
+
+			if (json.get("result").asText().equals("updated")) {
+				return true;
+			} else {
+				return false;
+			}
 		});
+
+		if (!result) {
+			throw new BusinessException("Failed to update");
+		}
 	}
 
 	@Override
@@ -306,7 +287,6 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public Integer count(Repository repository, CustomEntityTemplate cet, PaginationConfiguration paginationConfiguration) {
-		final Map<String, CustomFieldTemplate> fields = cftService.getCftsWithInheritedFields(cet);
 		final Map<String, Object> filters = paginationConfiguration == null ? null : paginationConfiguration.getFilters();
 
 		StorageQuery query = new StorageQuery();
@@ -323,16 +303,11 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 		return client.execute(get, response -> {
 			var mapper = JacksonUtil.OBJECT_MAPPER;
-			try {
-				var responseJson =  mapper.readTree(response.getEntity().getContent());
-				LOG.info("Count result = {}", responseJson);
-				return responseJson.get("count").asInt();
-
-			} catch (UnsupportedOperationException | IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-				return null;
-			}
+			var responseJson =  mapper.readTree(response.getEntity().getContent());
+			LOG.info("Count result = {}", responseJson);
+			return responseJson.get("count").asInt();
+		}, e -> { 
+			LOG.error("Failed to read response", e);
 		});
 	}
 
@@ -347,24 +322,22 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void removeCet(CustomEntityTemplate cet) {
-		// for (var repository : cet.getRepositories()) {
-		// 	ElasticsearchClient client = beginTransaction(repository, 0);
-		// 	DeleteIndexRequest request = new DeleteIndexRequest.Builder()
-		// 		.index(cet.getCode())
-		// 		.build();
-
-		// 	try {
-		// 		client.indices().delete(request);
-		// 	} catch (IOException e) {
-		// 		LOG.error("Failed to delete index for {}", cet.getCode());
-		// 	}
-		// }
+		for (var repository : cet.getRepositories()) {
+			ElasticRestClient client = beginTransaction(repository, 0);
+			int result = client.delete("/%s", cet.getCode().toLowerCase());
+			if (result == 404) {
+				LOG.info("Index cet {} already deleted", cet.getCode().toLowerCase());
+			} else if (result == 200) {
+				LOG.info("Index cet {} successfully deleted", cet.getCode().toLowerCase());
+			} else {
+				throw new PersistenceException("Error deleting cet index " + cet.getCode().toLowerCase());
+			}
+		}
 	}
 
 	@Override
 	public void crtCreated(CustomRelationshipTemplate crt) throws BusinessException {
-		
-
+		//NOOP
 	}
 
 	@Override
@@ -386,36 +359,32 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public void cetUpdated(CustomEntityTemplate oldCet, CustomEntityTemplate cet) {
-		
-
+		//NOOP - TODO later
 	}
 
 	@Override
 	public void crtUpdated(CustomRelationshipTemplate cet) throws BusinessException {
-		
-
+		//NOOP 
 	}
 
 	@Override
 	public void cftUpdated(CustomModelObject template, CustomFieldTemplate oldCft, CustomFieldTemplate cft) {
-		
+		//NOOP - TODO later
 	}
 
 	@Override
 	public void removeCft(CustomModelObject template, CustomFieldTemplate cft) {
-		
-
+		//NOOP
 	}
 
 	@Override
 	public void removeCrt(CustomRelationshipTemplate crt) {
-		
-
+		//NOOP
 	}
 
 	@Override
 	public void init() {
-
+		//NOOP
 	}
 
 	@SuppressWarnings("unchecked")
@@ -453,11 +422,6 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 		switch (cft.getFieldType()) {
 			case LONG:
-				// LongNumberProperty longNumberProperty = new LongNumberProperty.Builder()
-				// 	.build();
-				// propertyBuilder.long_(longNumberProperty);
-				// break;
-
 			case LONG_TEXT:
 			case TEXT_AREA:
 				// "text"

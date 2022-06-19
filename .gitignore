@@ -1,0 +1,4 @@
+
+*.prefs
+facets/maven/.project
+facets/maven/.classpath
