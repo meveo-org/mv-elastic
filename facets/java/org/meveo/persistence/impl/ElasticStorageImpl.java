@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-@RequestScoped
 public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	private CustomFieldTemplateService cftService = getCDIBean(CustomFieldTemplateService.class);
