@@ -1,0 +1,27 @@
+{
+  "code" : "org.meveo.endpoints.AutoCompleteEndpointScript",
+  "inputs" : [ {
+    "name" : "repository",
+    "type" : "String"
+  }, {
+    "name" : "entity",
+    "type" : "String"
+  }, {
+    "name" : "field",
+    "type" : "String"
+  }, {
+    "name" : "query",
+    "type" : "String"
+  } ],
+  "outputs" : [{
+    "name" : "output",
+    "type" : "List<String>"
+  }],
+  "generateOutputs" : false,
+  "type" : "JAVA",
+  "transactionType" : "SAME",
+  "executionRoles" : [ ],
+  "sourcingRoles" : [ ],
+  "mavenDependencies" : [ ],
+  "importScriptInstances" : [ ]
+}
