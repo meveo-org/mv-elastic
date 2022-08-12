@@ -8,5 +8,6 @@
     "moduleFiles" : [ ],
     "script": {
       "code": "org.meveo.elastic.InstallationScript"
-    }
+    },
+    "autoCommit": false
   }
