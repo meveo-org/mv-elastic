@@ -27,4 +27,12 @@ public class InstallationScript extends ModuleScript {
         elasticDbStorageType.setStorageImplScript(scriptInstanceService.findByCode("org.meveo.persistence.impl.ElasticStorageImpl"));
         dbStorageTypeService.create(elasticDbStorageType);
     }
+  
+    @Override
+    public void preUninstallModule(Map<String, Object> methodContext) throws BusinessException {
+      DBStorageType elasticDbStorageType = dbStorageTypeService.find("ELASTIC");
+      if (elasticDbStorageType != null) {
+      	dbStorageTypeService.delete(elasticDbStorageType);
+      }
+    }
 }
