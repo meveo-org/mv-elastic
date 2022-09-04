@@ -2,6 +2,7 @@ package org.meveo.persistence.impl;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +26,7 @@ import org.meveo.model.customEntities.CustomModelObject;
 import org.meveo.model.customEntities.CustomRelationshipTemplate;
 import org.meveo.model.persistence.DBStorageType;
 import org.meveo.model.persistence.JacksonUtil;
+import org.meveo.model.storage.IStorageConfiguration;
 import org.meveo.model.storage.Repository;
 import org.meveo.persistence.PersistenceActionResult;
 import org.meveo.persistence.StorageImpl;
@@ -54,10 +56,13 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	public List<String> autoComplete(Repository repository, String cet, String cft, String query) throws BusinessException {
-		ElasticRestClient client = beginTransaction(repository, 0);
-
-		var queryJson = JacksonUtil.OBJECT_MAPPER.createObjectNode();
-		queryJson.putObject("query")
+		List<String> result = new ArrayList<>();
+		
+		for (var conf : repository.getStorageConfigurations(storageType()) ){
+			ElasticRestClient client = beginTransaction(conf, 0);
+			
+			var queryJson = JacksonUtil.OBJECT_MAPPER.createObjectNode();
+			queryJson.putObject("query")
 			.putObject("multi_match")
 			.put("query", query)
 			.put("type", "phrase_prefix")
@@ -65,20 +70,23 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 			.add(cft.toLowerCase())
 			.add(cft.toLowerCase() + "._2gram")
 			.add(cft.toLowerCase() + "._3gram");
-
-		var request = client.get("/%s/_search", cet.toLowerCase());
-		client.setBody(request, queryJson.toString());
-
-		LOG.info("Autocomplete query = {}", queryJson);
-
-		return client.execute(request, response -> {
-			var responseJson = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
-			return responseJson.get("hits").get("hits").findValuesAsText(cft.toLowerCase());
-		}, "Failed to read response");
+			
+			var request = client.get("/%s/_search", cet.toLowerCase());
+			client.setBody(request, queryJson.toString());
+			
+			LOG.info("Autocomplete query = {}", queryJson);
+			
+			result.addAll(client.execute(request, response -> {
+				var responseJson = JacksonUtil.OBJECT_MAPPER.readTree(response.getEntity().getContent());
+				return responseJson.get("hits").get("hits").findValuesAsText(cft.toLowerCase());
+			}, "Failed to read response"));
+		}
+		
+		return result;
 	}
 
 	@Override
-	public boolean exists(Repository repository, CustomEntityTemplate cet, String uuid) {
+	public boolean exists(IStorageConfiguration repository, CustomEntityTemplate cet, String uuid) {
 		ElasticRestClient client = beginTransaction(repository, 0);
 
 		int status = client.head("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
@@ -116,10 +124,10 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	@Override
-	public String findEntityIdByValues(Repository repository, CustomEntityInstance cei) {
+	public String findEntityIdByValues(Repository repository, IStorageConfiguration conf, CustomEntityInstance cei) {
 		StorageQuery query = new StorageQuery();
 		query.setCet(cei.getCet());
-		query.setRepository(repository);
+		query.setStorageConfiguration(conf);
 		query.setFilters(cei.getCfValuesAsValues(storageType(), cei.getFieldTemplates().values(), true));
 
 		try {
@@ -166,7 +174,7 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	@Override
-	public Map<String, Object> findById(Repository repository, CustomEntityTemplate cet, String uuid,
+	public Map<String, Object> findById(IStorageConfiguration repository, CustomEntityTemplate cet, String uuid,
 			Map<String, CustomFieldTemplate> cfts, Collection<String> fetchFields, boolean withEntityReferences) {
 			
 		ElasticRestClient client = beginTransaction(repository, 0);
@@ -182,7 +190,7 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@Override
 	public List<Map<String, Object>> find(StorageQuery query) throws EntityDoesNotExistsException {
-		ElasticRestClient client = beginTransaction(query.getRepository(), 0);
+		ElasticRestClient client = beginTransaction(query.getStorageConfiguration(), 0);
 		var fieldsTemplates = cftService.findByAppliesTo(query.getCet().getAppliesTo());
 
 		var get = client.get("/%s/_search", query.getCet().getCode().toLowerCase());
@@ -216,15 +224,15 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	@Override
-	public PersistenceActionResult createOrUpdate(Repository repository, CustomEntityInstance cei,
+	public PersistenceActionResult createOrUpdate(Repository repository, IStorageConfiguration conf, CustomEntityInstance cei,
 			Map<String, CustomFieldTemplate> customFieldTemplates, String foundUuid) throws BusinessException {
 		
-		if (this.exists(repository, cei.getCet(), cei.getUuid())) {
-			this.update(repository, cei);
+		if (this.exists(conf, cei.getCet(), cei.getUuid())) {
+			this.update(repository, conf, cei);
 			return new PersistenceActionResult(cei.getUuid());
 		} else {
 
-			ElasticRestClient client = beginTransaction(repository, 0);
+			ElasticRestClient client = beginTransaction(conf, 0);
 
 			var put = client.put("/%s/_create/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
 			client.setBody(put, getDocBody(cei));
@@ -241,14 +249,14 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	@Override
-	public PersistenceActionResult addCRTByUuids(Repository repository, CustomRelationshipTemplate crt,
+	public PersistenceActionResult addCRTByUuids(IStorageConfiguration repository, CustomRelationshipTemplate crt,
 			Map<String, Object> relationValues, String sourceUuid, String targetUuid) throws BusinessException {
 		return null;
 	}
 
 	@Override
-	public void update(Repository repository, CustomEntityInstance cei) throws BusinessException {
-		ElasticRestClient client = beginTransaction(repository, 0);
+	public void update(Repository repository, IStorageConfiguration conf, CustomEntityInstance cei) throws BusinessException {
+		ElasticRestClient client = beginTransaction(conf, 0);
 		var request = client.put("/%s/_doc/%s", cei.getCetCode().toLowerCase(), cei.getUuid());
 		client.setBody(request, getDocBody(cei));
 
@@ -273,28 +281,28 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	}
 
 	@Override
-	public void setBinaries(Repository repository, CustomEntityTemplate cet, CustomFieldTemplate cft, String uuid,
+	public void setBinaries(IStorageConfiguration repository, CustomEntityTemplate cet, CustomFieldTemplate cft, String uuid,
 			List<File> binaries) throws BusinessException {
 
 	}
 
 	@Override
-	public void remove(Repository repository, CustomEntityTemplate cet, String uuid) throws BusinessException {
+	public void remove(IStorageConfiguration repository, CustomEntityTemplate cet, String uuid) throws BusinessException {
 		ElasticRestClient client = beginTransaction(repository, 0);
 		client.delete("/%s/_doc/%s", cet.getCode().toLowerCase(), uuid);
 	}
 
 	@Override
-	public Integer count(Repository repository, CustomEntityTemplate cet, PaginationConfiguration paginationConfiguration) {
+	public Integer count(IStorageConfiguration repository, CustomEntityTemplate cet, PaginationConfiguration paginationConfiguration) {
 		final Map<String, Object> filters = paginationConfiguration == null ? null : paginationConfiguration.getFilters();
 
 		StorageQuery query = new StorageQuery();
 		query.setCet(cet);
 		query.setFilters(filters);
 		query.setPaginationConfiguration(paginationConfiguration);
-		query.setRepository(repository);
+		query.setStorageConfiguration(repository);
 
-		ElasticRestClient client = beginTransaction(query.getRepository(), 0);
+		ElasticRestClient client = beginTransaction(repository, 0);
 		var fieldsTemplates = cftService.findByAppliesTo(query.getCet().getAppliesTo());
 
 		var get = client.get("/%s/_count", query.getCet().getCode().toLowerCase());
@@ -313,24 +321,31 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	@Override
 	public void cetCreated(CustomEntityTemplate cet) {
 		for (var repository : cet.getRepositories()) {
-			ElasticRestClient client = beginTransaction(repository, 0);
-			var request = client.put("/%s", cet.getCode().toLowerCase());
-			client.execute(request, null);
+			repository.getStorageConfigurations(storageType())
+			.forEach(conf -> {
+				ElasticRestClient client = beginTransaction(conf, 0);
+				var request = client.put("/%s", cet.getCode().toLowerCase());
+				client.execute(request, null);
+			});
 		}
 	}
 
 	@Override
 	public void removeCet(CustomEntityTemplate cet) {
 		for (var repository : cet.getRepositories()) {
-			ElasticRestClient client = beginTransaction(repository, 0);
-			int result = client.delete("/%s", cet.getCode().toLowerCase());
-			if (result == 404) {
-				LOG.info("Index cet {} already deleted", cet.getCode().toLowerCase());
-			} else if (result == 200) {
-				LOG.info("Index cet {} successfully deleted", cet.getCode().toLowerCase());
-			} else {
-				throw new PersistenceException("Error deleting cet index " + cet.getCode().toLowerCase());
-			}
+			repository.getStorageConfigurations(storageType())
+				.forEach(conf -> {
+					ElasticRestClient client = beginTransaction(conf, 0);
+					int result = client.delete("/%s", cet.getCode().toLowerCase());
+					if (result == 404) {
+						LOG.info("Index cet {} already deleted", cet.getCode().toLowerCase());
+					} else if (result == 200) {
+						LOG.info("Index cet {} successfully deleted", cet.getCode().toLowerCase());
+					} else {
+						throw new PersistenceException("Error deleting cet index " + cet.getCode().toLowerCase());
+					}
+				});
+
 		}
 	}
 
@@ -342,16 +357,19 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 	@Override
 	public void cftCreated(CustomModelObject template, CustomFieldTemplate cft) {
 		for (var repository : template.getRepositories()) {
-			ElasticRestClient client = beginTransaction(repository, 0);
+			repository.getStorageConfigurations(storageType())
+				.forEach(conf -> {
+					ElasticRestClient client = beginTransaction(conf, 0);
 
-			Map<String, Object> mapping = new HashMap<>();
-			mapping.put("properties", 
-				Map.of(cft.getCode().toLowerCase(), getPropertyFromCft(cft))
-			);
+					Map<String, Object> mapping = new HashMap<>();
+					mapping.put("properties", 
+						Map.of(cft.getCode().toLowerCase(), getPropertyFromCft(cft))
+					);
 
-			var request = client.put("/%s/_mapping", template.getCode().toLowerCase());
-			client.setBody(request, JacksonUtil.toString(mapping));
-			client.execute(request, null);
+					var request = client.put("/%s/_mapping", template.getCode().toLowerCase());
+					client.setBody(request, JacksonUtil.toString(mapping));
+					client.execute(request, null);	
+				});
 		}
 
 	}
@@ -388,19 +406,20 @@ public class ElasticStorageImpl extends Script implements StorageImpl {
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public <T> T beginTransaction(Repository repository, int stackedCalls) {
+	public <T> T beginTransaction(IStorageConfiguration repository, int stackedCalls) {
 		return (T) clients.computeIfAbsent(repository.getCode(), code -> {
-			String elasticHost = (String) cfiService.getCFValue(repository, "elasticHost");
-			int elasticPort = ((Long) cfiService.getCFValue(repository, "elasticPort")).intValue();
-			String elasticUsername = (String) cfiService.getCFValue(repository, "elasticUsername");
-			String elasticPassword = (String) cfiService.getCFValue(repository, "elasticPassword");
+			String elasticHost = repository.getHostname();
+			int elasticPort = repository.getPort();
+			String elasticUsername = repository.getCredential().getUsername();
+			String elasticPassword = repository.getCredential().getPassword();
+			
 
-			return new ElasticRestClient(elasticHost, elasticPort, elasticUsername, elasticPassword);
+			return new ElasticRestClient(repository.getProtocol() + "://" + elasticHost, elasticPort, elasticUsername, elasticPassword);
 		});
 	}
 
 	@Override
-	public void commitTransaction(Repository repository) {
+	public void commitTransaction(IStorageConfiguration repository) {
 		// NOOP
 	}
 
