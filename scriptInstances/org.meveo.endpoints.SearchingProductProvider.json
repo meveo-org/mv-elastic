@@ -1,0 +1,63 @@
+{
+  "code" : "org.meveo.endpoints.SearchingProductProvider",
+  "inputs" : [ {
+    "name" : "indexName",
+    "type" : "String"
+  }, {
+    "name" : "keyword",
+    "type" : "String"
+  }, {
+    "name" : "locationRadiusInKm",
+    "type" : "Double"
+  }, {
+    "name" : "isAvailable",
+    "type" : "Boolean"
+  }, {
+    "name" : "isBestSeller",
+    "type" : "Boolean"
+  }, {
+    "name" : "priceMin",
+    "type" : "Double"
+  }, {
+    "name" : "priceMax",
+    "type" : "Double"
+  }, {
+    "name" : "ratingMin",
+    "type" : "Integer"
+  }, {
+    "name" : "longitude_user",
+    "type" : "Double"
+  }, {
+    "name" : "latitude_user",
+    "type" : "Double"
+  }, {
+    "name" : "productCategsIds",
+    "type" : "Integer[]"
+  }, {
+    "name" : "name",
+    "type" : "String"
+  }, {
+    "name" : "orderBy",
+    "type" : "String"
+  }, {
+    "name" : "ordering",
+    "type" : "String"
+  }, {
+    "name" : "currentPage",
+    "type" : "int"
+  }, {
+    "name" : "pageSize",
+    "type" : "int"
+  } ],
+  "outputs" : [ {
+    "name" : "result",
+    "type" : "JSONObject"
+  } ],
+  "generateOutputs" : false,
+  "type" : "JAVA",
+  "transactionType" : "SAME",
+  "executionRoles" : [ ],
+  "sourcingRoles" : [ ],
+  "mavenDependencies" : [ ],
+  "importScriptInstances" : [ ]
+}

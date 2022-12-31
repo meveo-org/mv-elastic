@@ -1,0 +1,87 @@
+{
+  "code" : "es_products_api",
+  "secured" : true,
+  "checkPathParams" : true,
+  "serviceCode" : "org.meveo.endpoints.SearchingProductProvider",
+  "synchronous" : true,
+  "method" : "GET",
+  "parameterMappings" : [ {
+    "serviceParameter" : "currentPage",
+    "multivalued" : false,
+    "parameterName" : "currentPage",
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "indexName",
+    "multivalued" : false,
+    "defaultValue" : "en_us-product-template-v15",
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "isAvailable",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "isBestSeller",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "keyword",
+    "multivalued" : false,
+    "parameterName" : "keyword",
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "latitude_user",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "locationRadiusInKm",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "longitude_user",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "name",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "orderBy",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "ordering",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "pageSize",
+    "multivalued" : false,
+    "parameterName" : "pageSize",
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "priceMax",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "priceMin",
+    "multivalued" : false,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "productCategsIds",
+    "multivalued" : true,
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "ratingMin",
+    "multivalued" : false,
+    "valueRequired" : false
+  } ],
+  "pathParameters" : [ ],
+  "roles" : [ ],
+  "returnedVariableName" : "result",
+  "serializeResult" : true,
+  "contentType" : "application/json",
+  "basePath" : "es_products_api",
+  "path" : "/",
+  "pool" : {
+    "usePool" : false
+  }
+}
