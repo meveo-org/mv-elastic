@@ -1,0 +1,67 @@
+{
+	"info": {
+		"_postman_id": "a0214f63-5a53-4d0c-bbf6-d525ec606a88",
+		"name": "ElasticSearch",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "7005532"
+	},
+	"item": [		
+		{
+			"name": "query Product by keyword",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{access_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{protocol}}://{{hostname}}:{{port}}/{{webContext}}/rest/es_products_api?keyword={{searchKeyword}}&currentPage=1&pageSize=5",
+					"protocol": "{{protocol}}",
+					"host": [
+						"{{hostname}}"
+					],
+					"port": "{{port}}",
+					"path": [
+						"{{webContext}}",
+						"rest",
+						"es_products_api"
+					],
+					"query": [
+						{
+							"key": "keyword",
+							"value": "{{searchKeyword}}"
+						},
+						{
+							"key": "currentPage",
+							"value": "1"
+						},
+						{
+							"key": "pageSize",
+							"value": "5"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
