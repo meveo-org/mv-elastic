@@ -128,11 +128,11 @@ public class SearchingProductProvider extends Script {
 
     private void init() {
         ParamBean config = paramBeanFactory.getInstance();
-        _protocol = config.getProperty("elasticsearch.protocol","http");
-        _host     = config.getProperty("elasticsearch.hosts","index-dev.telecelplay.io");
-        _port     = config.getProperty("elasticsearch.port","9200");
-        _username = config.getProperty("elasticsearch.username","elastic");
-        _password = config.getProperty("elasticsearch.password","GckzEi8j9uVBW1lCMmcB");
+        _protocol = config.getProperty("elasticsearch.protocol");
+        _host     = config.getProperty("elasticsearch.hosts");
+        _port     = config.getProperty("elasticsearch.port");
+        _username = config.getProperty("elasticsearch.username");
+        _password = config.getProperty("elasticsearch.password");
     }
 
     @Override
