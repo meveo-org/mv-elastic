@@ -4,20 +4,16 @@
   "checkPathParams" : true,
   "serviceCode" : "org.meveo.endpoints.SearchingProductProvider",
   "synchronous" : true,
-  "method" : "GET",
+  "method" : "POST",
   "parameterMappings" : [ {
+    "serviceParameter" : "indexName",
+    "multivalued" : false,
+    "defaultValue" : "website-1-en_us-product-product-v15_nhan-testing",
+    "valueRequired" : false
+  }, {
     "serviceParameter" : "currentPage",
     "multivalued" : false,
     "parameterName" : "currentPage",
-    "valueRequired" : false
-  }, {
-    "serviceParameter" : "indexName",
-    "multivalued" : false,
-    "defaultValue" : "en_us-product-template-v15",
-    "valueRequired" : false
-  }, {
-    "serviceParameter" : "isAvailable",
-    "multivalued" : false,
     "valueRequired" : false
   }, {
     "serviceParameter" : "isBestSeller",
@@ -58,12 +54,9 @@
     "parameterName" : "pageSize",
     "valueRequired" : false
   }, {
-    "serviceParameter" : "priceMax",
+    "serviceParameter" : "isAvailable",
     "multivalued" : false,
-    "valueRequired" : false
-  }, {
-    "serviceParameter" : "priceMin",
-    "multivalued" : false,
+    "parameterName" : "isAvailable",
     "valueRequired" : false
   }, {
     "serviceParameter" : "productCategsIds",
@@ -73,11 +66,21 @@
     "serviceParameter" : "ratingMin",
     "multivalued" : false,
     "valueRequired" : false
+  }, {
+    "serviceParameter" : "priceMax",
+    "multivalued" : false,
+    "parameterName" : "priceMax",
+    "valueRequired" : false
+  }, {
+    "serviceParameter" : "priceMin",
+    "multivalued" : false,
+    "parameterName" : "priceMin",
+    "valueRequired" : false
   } ],
   "pathParameters" : [ ],
   "roles" : [ ],
   "returnedVariableName" : "result",
-  "serializeResult" : true,
+  "serializeResult" : false,
   "contentType" : "application/json",
   "basePath" : "es_products_api",
   "path" : "/",

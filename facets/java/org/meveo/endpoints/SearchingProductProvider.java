@@ -11,9 +11,12 @@ import org.meveo.admin.exception.BusinessException;
 import org.meveo.commons.utils.ParamBean;
 import org.meveo.commons.utils.ParamBeanFactory;
 import org.meveo.model.persistence.JacksonUtil;
+import org.meveo.elastic.ElasticQueryBuilder;
 import org.meveo.elastic.ElasticRestClient;
 
-public class SearchingProductProvider extends Script {   
+public class SearchingProductProvider extends Script {
+
+    private ElasticQueryBuilder queryBuilder = new ElasticQueryBuilder();
     
     @Inject
     private ParamBeanFactory paramBeanFactory;
@@ -48,9 +51,9 @@ public class SearchingProductProvider extends Script {
 
     private Double latitude_user;
 
-    private int pageSize = 10;
+    private Integer pageSize = 0;
 
-    private int currentPage = 1;
+    private Integer currentPage = 0;
 
     private Double priceMin;
 
@@ -112,17 +115,17 @@ public class SearchingProductProvider extends Script {
         this.ordering = ordering;
     }
 
-    public void setCurrentPage(int currentPage) {
+    public void setCurrentPage(Integer currentPage) {
         this.currentPage = currentPage;
     }
 
-    public void setPageSize(int pageSize) {
+    public void setPageSize(Integer pageSize) {
         this.pageSize = pageSize;
     }
 
-    private JSONObject result;
+    private String result;
 
-    public JSONObject getResult() {
+    public String getResult() {
         return result;
     }
 
@@ -139,42 +142,40 @@ public class SearchingProductProvider extends Script {
     public void execute(Map<String, Object> parameters) throws BusinessException {
         super.execute(parameters);
         this.init();
+
         try {
-
-            result = this.query(currentPage, pageSize, keyword, indexName, "*");         
-          
+            result = this.query(currentPage, pageSize, keyword, indexName, "*");
         } catch (Exception e) {
-
-            result = new JSONObject("{\"error\": \""+e.toString()+"\"}");
+            result = "{\"error\": \""+e+"\"}";
         }
     }
 
-    public JSONObject query(int pageNumber, int pageSize, String keyword, String indexName, String fields) throws Exception {
+    private String query(int pageNumber, int pageSize, String keyword, String indexName, String fields) throws BusinessException {
         var client = new ElasticRestClient(_protocol + "://" + _host, Integer.parseInt(_port), _username, _password);
-
-        var queryJson = JacksonUtil.OBJECT_MAPPER.createObjectNode();
-
-        queryJson.put("from", pageNumber)
-                .put("size", pageSize)
-                .putObject("query")
-                .putObject("multi_match")
-                .put("query", keyword)
-                .put("type", "phrase_prefix")
-                .putArray("fields")
-                .add(fields.toLowerCase())
-                .add(fields.toLowerCase() + "._2gram")
-                .add(fields.toLowerCase() + "._3gram");
         
         var request = client.get("/%s/_search", indexName.toLowerCase());
+
+        var query = generateQuery(pageNumber, pageSize, keyword, indexName, fields);
         
-        client.setBody(request, queryJson.toString());
+        client.setBody(request, query);
 
-        String content = client.execute(request, response -> {
-            return EntityUtils.toString(response.getEntity());
-        }, "{\"error\": \"Failed to read response\"}");
+        String content = client.execute(
+            request, 
+            response -> {
+                return EntityUtils.toString(response.getEntity(), "UTF-8");
+            },
+            "{\"error\": \"Failed to read response\"}");
+        return content;
+    }
 
-        return new JSONObject(content);
-
+    public String generateQuery(int pageNumber, int pageSize, String searchKeyword, String indexName, String fields) {
+        String query = queryBuilder.withKeyword(searchKeyword)
+                                    .withFilterIsAvailable(isAvailable)
+                                    .withFilterPriceRange(priceMin, priceMax)                                    
+                                    .withPageSize(pageSize)
+                                    .withPageNumber(pageNumber)
+                                    .build();
+        return query;
     }
     
 }
